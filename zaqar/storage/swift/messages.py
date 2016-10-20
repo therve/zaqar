@@ -12,8 +12,8 @@
 # limitations under the License.
 
 import functools
-import random
 
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 import swiftclient
@@ -22,8 +22,6 @@ from zaqar.common import decorators
 from zaqar import storage
 from zaqar.storage import errors
 from zaqar.storage.swift import utils
-
-_sys_rand = random.SystemRandom()
 
 
 class MessageController(storage.Message):
@@ -81,7 +79,7 @@ class MessageController(storage.Message):
         executing the operation.
         """
         # TODO(ryansb): handle sharded queue buckets
-        container = utils._queue_container(queue, project)
+        container = utils._message_container(queue, project)
         remaining = True
         key = ''
         while remaining:
@@ -100,17 +98,6 @@ class MessageController(storage.Message):
                         continue
                     raise
 
-    def _exists(self, message_id):
-        """Check if message exists in the Queue."""
-        try:
-            self._client.head_object(utils._message_id_container(message_id),
-                                     message_id)
-        except swiftclient.ClientException as exc:
-            if exc.http_status == 404:
-                raise errors.MessageDoesNotExist(message_id)
-            raise
-        return True
-
     def _list(self, queue, project=None, marker=None,
               limit=storage.DEFAULT_MESSAGES_PER_PAGE,
               echo=False, client_uuid=None,
@@ -128,7 +115,7 @@ class MessageController(storage.Message):
             raise errors.QueueDoesNotExist(queue, project)
 
         client = self._client
-        container = utils._queue_container(queue, project)
+        container = utils._message_container(queue, project)
 
         try:
             headers, objects = client.get_container(
@@ -143,10 +130,9 @@ class MessageController(storage.Message):
             raise
 
         def is_claimed(msg):
-            msg_id = msg['name'].split('-', 1)[-1]
             try:
-                client.head_object(utils._claims_container(queue, project),
-                                   msg_id)
+                client.head_object(utils._claim_container(queue, project),
+                                   msg['name'])
             except swiftclient.ClientException as exc:
                 if exc.http_status == 404:
                     return False
@@ -154,7 +140,7 @@ class MessageController(storage.Message):
             return True
 
         filters = [
-            lambda x: x['content_type'] == client_uuid,
+            lambda x: echo or x['content_type'] == client_uuid,
             is_claimed,
         ]
         marker = {}
@@ -187,12 +173,9 @@ class MessageController(storage.Message):
 
     def _find_message(self, queue, message_id, project):
         try:
-            msg_loc = self._client.head_object(
-                utils._message_id_container(message_id),
-                message_id
-            ).get('content-type').split(":::")
+            return self._client.get_object(
+                utils._message_container(queue, project), message_id)
 
-            return self._client.get_object(*msg_loc)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 raise errors.MessageDoesNotExist(message_id, queue, project)
@@ -220,41 +203,23 @@ class MessageController(storage.Message):
         if not self._queue_ctrl.exists(queue, project):
             raise errors.QueueDoesNotExist(queue, project)
 
-        message_ids = []
-        for m in messages:
-            message_ids.append(
-                self._create_msg(queue, m, client_uuid, project)
-            )
-
-        return message_ids
+        return [self._create_msg(queue, m, client_uuid, project)
+                for m in messages]
 
     def _create_msg(self, queue, msg, client_uuid, project):
-        now = timeutils.utcnow_ts(microsecond=True)
         slug = uuidutils.generate_uuid()
+        contents = jsonutils.dumps(msg.get('body', {}))
         try:
-            self._client.put_object(utils._queue_container(queue),
-                                    "%f-%s" % (now, slug),
+            self._client.put_object(utils._message_container(queue, project),
+                                    slug,
+                                    # XXX try with X-Object-Meta
                                     content_type=client_uuid,
-                                    contents=msg.get('body', {}),
-                                    headers={'X-Delete-After': msg['ttl']}
-                                    )
+                                    contents=contents,
+                                    headers={'X-Delete-After': msg['ttl']})
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 raise errors.QueueDoesNotExist(queue, project)
             raise
-
-        # index message ID in swift as well
-        utils._put_or_create_container(
-            self._client,
-            utils._message_id_container(slug),
-            slug,
-            contents='',
-            # Is using the content_type as a place to stash the URL
-            # advisable? Sure!
-            content_type="%s:::%f-%s" % (
-                utils._queue_container(queue, project), now, slug),
-            headers={'X-Delete-After': msg['ttl']}
-        )
         return slug
 
     def delete(self, queue, message_id, project=None, claim=None):
@@ -262,11 +227,8 @@ class MessageController(storage.Message):
 
     def _delete(self, queue, message_id, project=None, claim=None):
         try:
-            msg_loc = self._client.head_object(
-                utils._message_id_container(message_id),
-                message_id
-            ).get('content-type').split(":::")
-            headers, msg = self._client.delete_object(*msg_loc)
+            self._client.delete_object(
+                utils._message_container(queue, project), message_id
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 pass
@@ -296,18 +258,18 @@ class MessageQueueHandler(object):
         self._claim_ctrl = self.driver.claim_controller
 
     def create(self, name, metadata=None, project=None):
-        self._client.put_container(utils._queue_container(name, project))
+        self._client.put_container(utils._message_container(name, project))
 
     def delete(self, name, project=None):
         self._client.delete_container(
-            utils._queue_container(name, project))
+            utils._message_container(name, project))
 
     def stats(self, name, project=None):
         if not self._queue_ctrl.exists(name, project=project):
             raise errors.QueueDoesNotExist(name, project)
 
         self._client.head_container(
-            utils._queue_container(name, project))
+            utils._message_container(name, project))
 
         msg_stats = {
             'claimed': 0,
@@ -320,4 +282,13 @@ class MessageQueueHandler(object):
         return {'messages': msg_stats}
 
     def exists(self, queue, project=None):
-        return self._client.head_container(utils._queue_container(queue))
+        try:
+            self._client.head_container(utils._message_container(queue,
+                                                                 project))
+
+        except swiftclient.ClientException as exc:
+            if exc.http_status == 404:
+                return False
+            raise
+        else:
+            return True

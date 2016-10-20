@@ -41,7 +41,7 @@ class ClaimController(storage.Claim):
     def _exists(self, queue, claim_id, project=None):
         try:
             self._client.head_object(
-                utils._claims_container(queue, project),
+                utils._claim_container(queue, project),
                 claim_id)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
@@ -53,7 +53,7 @@ class ClaimController(storage.Claim):
         now = timeutils.utcnow_ts()
         self._exists(queue, claim_id, project)
 
-        container = utils._claims_container(queue, project)
+        container = utils._claim_container(queue, project)
 
         headers, claim_owns = self._client.get_container(
             container,
@@ -95,7 +95,7 @@ class ClaimController(storage.Claim):
 
         utils._put_or_create_container(
             self._client,
-            utils._claims_container(),
+            utils._claim_container(queue, project),
             claim_id,
             '',
             headers={'if-none-match': '*',
@@ -112,7 +112,8 @@ class ClaimController(storage.Claim):
         claimed = []
         for m in messages:
             try:
-                self._claim_message(now + ttl, m['id'], claim_id)
+                self._claim_message(queue, project, now + ttl, m['id'],
+                                    claim_id)
             except swiftclient.ClientException as exc:
                 # if the claim exists
                 if exc.http_status == 412:
@@ -123,7 +124,8 @@ class ClaimController(storage.Claim):
 
             # TODO(ryansb): background this, it doesn't have to happen right
             # this second.
-            self._bump_message_ttls_to(msg_ts, [m['id'] for m in claimed])
+            self._bump_message_ttls_to(queue, project, msg_ts, [m['id'] for m
+                                                                in claimed])
 
         return claim_id, claimed
 
@@ -133,10 +135,10 @@ class ClaimController(storage.Claim):
     def delete(self, queue, claim_id, project=None):
         raise NotImplementedError
 
-    def _claim_message(self, ts, msg_id, claim_id):
+    def _claim_message(self, queue, project, ts, msg_id, claim_id):
         # put a claim-by-message-id
         self._client.put_object(
-            utils._claims_container(),
+            utils._claim_container(queue, project),
             msg_id,
             headers={'if-none-match': '*',
                      'content-type': claim_id,
@@ -144,7 +146,7 @@ class ClaimController(storage.Claim):
                      }
         )
         self._client.put_object(
-            utils._claims_container(),
+            utils._claim_container(queue, project),
             "%s/%s" % (claim_id, msg_id),
             headers={'if-none-match': '*',
                      'content-type': 'zaqar-msg-claim',
@@ -152,7 +154,7 @@ class ClaimController(storage.Claim):
                      }
         )
 
-    def _bump_message_ttls_to(self, ts, msg_ids):
+    def _bump_message_ttls_to(self, queue, project, ts, msg_ids):
         """Given a list of message IDs, bump them to expire later.
 
         This finds and bumps their index keys as well
@@ -160,13 +162,10 @@ class ClaimController(storage.Claim):
         client = self._client
 
         for msg in msg_ids:
-            id_container = utils._message_id_container(msg)
-            msg_meta = client.head_object(id_container, msg)
-            msg_container, key = msg_meta.get('content-type').split(":::")
+            container = utils._message_container(queue, project)
+            msg_meta = client.head_object(container, msg)
 
             if ts - msg_meta['x-delete-at']:
                 # message would expire before the claim
-                # boost the message ID index ttl
-                client.post_object(id_container, msg, {'x-delete-at': ts})
                 # boost the message ttl
-                client.post_object(msg_container, key, {'x-delete-at': ts})
+                client.post_object(container, msg, {'x-delete-at': ts})

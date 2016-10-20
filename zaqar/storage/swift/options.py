@@ -15,7 +15,7 @@
 
 from oslo_config import cfg
 MESSAGE_SWIFT_OPTIONS = (
-    cfg.StrOpt('auth_url', default="http://192.168.100.140:5000/v2.0/",
+    cfg.StrOpt('auth_url', default="http://127.0.0.1:5000/v2.0/",
                help="URI of keystone endpoint to discover swift"),
     cfg.StrOpt('user', default="demo", help="Username"),
     cfg.StrOpt('tenant', default="demo", help="Tenant"),

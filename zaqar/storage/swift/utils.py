@@ -15,26 +15,20 @@ from oslo_utils import timeutils
 import swiftclient
 
 
-def _queue_container(queue, project=None):
-    return "zaqar_queue:%s:%s" % (queue, project)
+def _message_container(queue, project=None):
+    return "zaqar_message:%s:%s" % (queue, project)
 
 
-def _message_id_container(msg_id):
-    return "zaqar_msg_index"
-    # TODO(ryansb): come up with a sharding strategy that isn't awful.
-    return "zaqar_msg_index:%s" % msg_id[:2]
+def _claim_container(queue=None, project=None):
+    return "zaqar_claim:%s:%s" % (queue, project)
 
 
-def _claims_container(queue=None, project=None):
-    return "zaqar_claims:%s:%s" % (queue, project)
+def _queue_container(project=None):
+    return "zaqar_queue:%s" % (project,)
 
 
-def _message_location(client, message_id):
-    """Get the (container, key) for a given message ID."""
-    return client.head_object(
-        _message_id_container(message_id),
-        message_id
-    ).get('content-type').split(":::")
+def _subscription_container(queue, project=None):
+    return "zaqar_subscription:%s:%s" % (queue, project)
 
 
 def _put_or_create_container(client, *args, **kwargs):
@@ -104,3 +98,45 @@ def _filter_messages(messages, filters, marker, get_object, limit=10000):
             }
             if limit <= 0:
                 break
+
+
+class QueueListCursor(object):
+
+    def __init__(self, objects, detailed, marker_next):
+        self.objects = iter(objects)
+        self.detailed = detailed
+        self.marker_next = marker_next
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        curr = next(self.objects)
+        self.marker_next['next'] = curr['name']
+        queue = {'name': curr['name']}
+        if self.detailed:
+            _, metadata = self._client.get_object(container, obj)
+            queue['metadata'] = metadata
+        return queue
+
+
+    def __next__(self):
+        return self.next()
+
+
+class SubscriptionListCursor(object):
+
+    def __init__(self, objects, marker_next):
+        self.objects = iter(objects)
+        self.marker_next = marker_next
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        curr = next(self.objects)
+        self.marker_next['next'] = curr['name']
+        return curr['name']
+
+    def __next__(self):
+        return self.next()

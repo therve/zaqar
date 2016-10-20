@@ -48,17 +48,26 @@ class DataDriver(storage.DataDriverBase):
         return True
 
     @decorators.lazy_property(write=False)
+    def queue_controller(self):
+        return controllers.QueueController(self)
+
+    @decorators.lazy_property(write=False)
     def message_controller(self):
         return controllers.MessageController(self)
 
+    @decorators.lazy_property(write=False)
     def subscription_controller(self):
-        raise NotImplementedError("nope, no subs for you")
+        return controllers.SubscriptionController(self)
 
+    @decorators.lazy_property(write=False)
     def claim_controller(self):
-        raise NotImplementedError("nope, no claims for you")
+        return controllers.ClaimController(self)
 
     def _health(self):
         raise NotImplementedError("no health checks")
+
+    def close(self):
+        pass
 
 
 def _get_swift_client(driver):
