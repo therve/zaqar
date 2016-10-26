@@ -19,6 +19,23 @@ from zaqar.storage.swift import utils
 
 
 class QueueController(storage.Queue):
+    """Implements queue resource operations with swift backend.
+
+    Queues are scoped by project.
+
+    queue -> Swift mapping:
+       +----------------+---------------------------------------+
+       | Attribute      | Storage location                      |
+       +----------------+---------------------------------------+
+       | Queue Name     | Object name                           |
+       +----------------+---------------------------------------+
+       | Project name   | Container name prefix                 |
+       +----------------+---------------------------------------+
+       | Created time   | Object Creation Time                  |
+       +----------------+---------------------------------------+
+       | Queue metadata | Object content                        |
+       +----------------+---------------------------------------+
+    """
 
     def __init__(self, *args, **kwargs):
         super(QueueController, self).__init__(*args, **kwargs)
@@ -38,7 +55,7 @@ class QueueController(storage.Queue):
             else:
                 raise
         marker_next = {}
-        yield utils.QueueListCursor(objects, detailed, marker_next)
+        yield utils.QueueListCursor(objects, detailed, marker_next, container)
         yield marker_next and marker_next['next']
 
     def _get(self, name, project=None):
@@ -63,10 +80,10 @@ class QueueController(storage.Queue):
 
     def _create(self, name, metadata=None, project=None):
         try:
-            self._client.put_object(utils._queue_container(project),
-                                    name,
-                                    content_type='application/json',
-                                    contents=jsonutils.dumps(metadata))
+            utils._put_or_create_container(
+                self._client, utils._queue_container(project), name,
+                content_type='application/json',
+                contents=jsonutils.dumps(metadata))
         except swiftclient.ClientException as exc:
             if exc.http_status == 304:
                 return False

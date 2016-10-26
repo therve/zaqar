@@ -26,4 +26,5 @@ expect = helpers.expect
 is_slow = helpers.is_slow
 requires_mongodb = helpers.requires_mongodb
 requires_redis = helpers.requires_redis
+requires_swift = helpers.requires_swift
 TestBase = base.TestBase

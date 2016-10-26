@@ -19,6 +19,25 @@ from zaqar.storage.swift import utils
 
 
 class SubscriptionController(storage.Subscription):
+    """Implements subscription resource operations with swift backend.
+
+    Subscriptions are scoped by queue and project.
+
+    subscription -> Swift mapping:
+       +----------------+---------------------------------------+
+       | Attribute      | Storage location                      |
+       +----------------+---------------------------------------+
+       | Sub UUID       | Object name                           |
+       +----------------+---------------------------------------+
+       | Queue Name     | Container name prefix                 |
+       +----------------+---------------------------------------+
+       | Project name   | Container name prefix                 |
+       +----------------+---------------------------------------+
+       | Created time   | Object Creation Time                  |
+       +----------------+---------------------------------------+
+       | Sub options    | Object content                        |
+       +----------------+---------------------------------------+
+    """
 
     def __init__(self, *args, **kwargs):
         super(SubscriptionController, self).__init__(*args, **kwargs)
@@ -33,7 +52,6 @@ class SubscriptionController(storage.Subscription):
                                                     marker=marker)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
-                self._client.put_container(container)
                 objects = []
             else:
                 raise
@@ -61,9 +79,8 @@ class SubscriptionController(storage.Subscription):
                 'age': None,
                 'options': options,
                 'confirmed': False}
-        self._client.put_object(container,
-                                slug,
-                                contents=data)
+        utils._put_or_create_container(
+            self._client, container, slug, contents=data)
         return slug
 
     def update(self, queue, subscription_id, project=None, **kwargs):
@@ -83,6 +100,7 @@ class SubscriptionController(storage.Subscription):
         return self._client.delete_object(container, subscription_id)
 
     def get_with_subscriber(self, queue, subscriber, project=None):
+        # XXX need an additional container
         pass
 
     def confirm(self, queue, subscription_id, project=None, confirmed=True):

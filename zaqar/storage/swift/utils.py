@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import swiftclient
 
@@ -55,7 +56,7 @@ def _message_to_json(message_id, msg, headers, now=None, claim_id=None):
         'id': message_id,
         'age': now - float(headers['x-timestamp']),
         'ttl': int(headers['x-delete-at']) - now,
-        'body': msg,
+        'body': jsonutils.loads(msg),
         'claim_id': claim_id,
     }
 
@@ -69,18 +70,14 @@ def _filter_messages(messages, filters, marker, get_object, limit=10000):
     now = timeutils.utcnow_ts()
 
     for msg in messages:
-        # NOTE(kgriffs): Message may have been deleted, so
-        # check each value to ensure we got a message back
         if msg is None:
             continue
 
-        # NOTE(kgriffs): Check to see if any of the filters
-        # indiciate that this message should be skipped.
         for should_skip in filters:
             if should_skip(msg):
                 break
         else:
-            marker['next'] = msg['name'].split('-', 1)[-1]
+            marker['next'] = msg['name']
             try:
                 headers, obj = get_object(msg['name'])
             except swiftclient.ClientException as exc:
@@ -102,10 +99,11 @@ def _filter_messages(messages, filters, marker, get_object, limit=10000):
 
 class QueueListCursor(object):
 
-    def __init__(self, objects, detailed, marker_next):
+    def __init__(self, objects, detailed, marker_next, container):
         self.objects = iter(objects)
         self.detailed = detailed
         self.marker_next = marker_next
+        self.container = container
 
     def __iter__(self):
         return self
@@ -115,10 +113,9 @@ class QueueListCursor(object):
         self.marker_next['next'] = curr['name']
         queue = {'name': curr['name']}
         if self.detailed:
-            _, metadata = self._client.get_object(container, obj)
+            _, metadata = self._client.get_object(self.container, curr['name'])
             queue['metadata'] = metadata
         return queue
-
 
     def __next__(self):
         return self.next()

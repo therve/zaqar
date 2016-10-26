@@ -104,7 +104,7 @@ class ClaimController(storage.Claim):
                      }
         )
 
-        messages, marker = self.message_controller._list(
+        messages, marker = self._message_ctrl._list(
             # list twice as many unclaimed as we need, since many of them may
             # get claimed between listing & claiming
             queue, project, limit=limit, include_claimed=False)
@@ -140,18 +140,18 @@ class ClaimController(storage.Claim):
         self._client.put_object(
             utils._claim_container(queue, project),
             msg_id,
+            '',
             headers={'if-none-match': '*',
                      'content-type': claim_id,
-                     'x-delete-after': ts,
-                     }
+                     'x-delete-after': ts}
         )
         self._client.put_object(
             utils._claim_container(queue, project),
             "%s/%s" % (claim_id, msg_id),
+            '',
             headers={'if-none-match': '*',
                      'content-type': 'zaqar-msg-claim',
-                     'x-delete-after': ts,
-                     }
+                     'x-delete-after': ts}
         )
 
     def _bump_message_ttls_to(self, queue, project, ts, msg_ids):
@@ -165,7 +165,7 @@ class ClaimController(storage.Claim):
             container = utils._message_container(queue, project)
             msg_meta = client.head_object(container, msg)
 
-            if ts - msg_meta['x-delete-at']:
+            if ts - int(msg_meta['x-delete-at']):
                 # message would expire before the claim
                 # boost the message ttl
                 client.post_object(container, msg, {'x-delete-at': ts})

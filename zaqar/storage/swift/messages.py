@@ -28,26 +28,22 @@ class MessageController(storage.Message):
     """Implements message resource operations with swift backend
 
     Messages are scoped by project + queue.
-    Message containers are project-scoped, and responses (lists etc)
-    are queue-filtered
 
     message -> Swift mapping:
        +--------------+-----------------------------------------+
        | Attribute    | Storage location                        |
        +--------------+-----------------------------------------+
-       | Msg UUID     | Obj name (TS-UUID)                      |
+       | Msg UUID     | Object name                             |
        +--------------+-----------------------------------------+
-       | Creator UUID | queue-name:creator-uuid                 |
+       | Queue Name   | Container name prefix                   |
        +--------------+-----------------------------------------+
-       | Queue Name   | queue-name:creator-uuid                 |
+       | Project name | Container name prefix                   |
        +--------------+-----------------------------------------+
-       | Project name | Container name prefix-project-partition |
+       | Created time | Object Creation Time                    |
        +--------------+-----------------------------------------+
-       | Created time | Swift Creation Time                     |
+       | Msg Body     | Object content                          |
        +--------------+-----------------------------------------+
-       | Msg Body     | Object contents                         |
-       +--------------+-----------------------------------------+
-       | Expires      | Swift Delete-After header               |
+       | Expires      | Object Delete-After header              |
        +--------------------------------------------------------+
     """
 
@@ -140,14 +136,14 @@ class MessageController(storage.Message):
             return True
 
         filters = [
-            lambda x: echo or x['content_type'] == client_uuid,
+            lambda x: False if echo else x['content_type'] == str(client_uuid),
             is_claimed,
         ]
         marker = {}
         obj_getter = functools.partial(self._client.get_object, container)
         yield utils._filter_messages(objects, filters, marker, obj_getter,
                                      limit=limit)
-        yield marker['next']
+        yield marker and marker['next']
 
     def list(self, queue, project=None, marker=None,
              limit=storage.DEFAULT_MESSAGES_PER_PAGE,
@@ -157,7 +153,12 @@ class MessageController(storage.Message):
                           client_uuid, include_claimed)
 
     def first(self, queue, project=None, sort=1):
-        return self._list(queue, project, limit=1)
+        cursor = self._list(queue, project, limit=1)
+        try:
+            message = next(next(cursor))
+        except StopIteration:
+            raise errors.QueueIsEmpty(queue, project)
+        return message
 
     def get(self, queue, message_id, project=None):
         return self._get(queue, message_id, project)
@@ -185,19 +186,16 @@ class MessageController(storage.Message):
     def bulk_delete(self, queue, message_ids, project=None):
         for id in message_ids:
             try:
-                yield self._delete(queue, id, project)
+                self._delete(queue, id, project)
             except errors.MessageDoesNotExist:
                 pass
 
     def bulk_get(self, queue, message_ids, project=None):
-        def g():
-            for id in message_ids:
-                try:
-                    yield self._get(queue, id, project)
-                except errors.MessageDoesNotExist:
-                    pass
-
-        return list(g)
+        for id in message_ids:
+            try:
+                yield self._get(queue, id, project)
+            except errors.MessageDoesNotExist:
+                pass
 
     def post(self, queue, messages, client_uuid, project=None):
         if not self._queue_ctrl.exists(queue, project):
@@ -213,7 +211,7 @@ class MessageController(storage.Message):
             self._client.put_object(utils._message_container(queue, project),
                                     slug,
                                     # XXX try with X-Object-Meta
-                                    content_type=client_uuid,
+                                    content_type=str(client_uuid),
                                     contents=contents,
                                     headers={'X-Delete-After': msg['ttl']})
         except swiftclient.ClientException as exc:
@@ -228,7 +226,7 @@ class MessageController(storage.Message):
     def _delete(self, queue, message_id, project=None, claim=None):
         try:
             self._client.delete_object(
-                utils._message_container(queue, project), message_id
+                utils._message_container(queue, project), message_id)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 pass
@@ -261,24 +259,46 @@ class MessageQueueHandler(object):
         self._client.put_container(utils._message_container(name, project))
 
     def delete(self, name, project=None):
-        self._client.delete_container(
-            utils._message_container(name, project))
+        for container in [utils._message_container(name, project),
+                          utils._claim_container(name, project)]:
+            try:
+                headers, objects = self._client.get_container(container)
+                for obj in objects:
+                    try:
+                        self._client.delete_object(container, obj['name'])
+                    except swiftclient.ClientException as exc:
+                        if exc.http_status != 404:
+                            raise
+                self._client.delete_container(container)
+            except swiftclient.ClientException as exc:
+                if exc.http_status != 404:
+                    raise
 
     def stats(self, name, project=None):
         if not self._queue_ctrl.exists(name, project=project):
             raise errors.QueueDoesNotExist(name, project)
 
-        self._client.head_container(
+        container_stats = self._client.head_container(
             utils._message_container(name, project))
 
+        try:
+            claim_stats = self._client.head_container(
+                utils._claim_container(name, project))
+        except swiftclient.ClientException as exc:
+            if exc.http_status != 404:
+                raise
+            claimed = 0
+        else:
+            claimed = int(claim_stats['x-container-object-count'])
+
+        total = int(container_stats['x-container-object-count'])
+
         msg_stats = {
-            'claimed': 0,
-            'free': 0,
-            'total': 0
-            # 'total': int(container_stats['x-container-object-count']),
+            'claimed': claimed,
+            'free': total - claimed,
+            'total': total,
         }
 
-        # TODO(ryansb): actually count messages, provide newest/oldest stats
         return {'messages': msg_stats}
 
     def exists(self, queue, project=None):
