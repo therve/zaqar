@@ -48,20 +48,22 @@ def _put_or_create_container(client, *args, **kwargs):
             raise
 
 
-def _message_to_json(message_id, msg, headers, now=None, claim_id=None):
+def _message_to_json(message_id, msg, headers, now=None):
     if now is None:
         now = timeutils.utcnow_ts()
+
+    msg = jsonutils.loads(msg)
 
     return {
         'id': message_id,
         'age': now - float(headers['x-timestamp']),
         'ttl': int(headers['x-delete-at']) - now,
-        'body': jsonutils.loads(msg),
-        'claim_id': claim_id,
+        'body': msg['body'],
+        'claim_id': msg['claim_id']
     }
 
 
-def _filter_messages(messages, filters, marker, get_object, limit=10000):
+def _filter_messages(messages, filters, marker, get_object, limit):
     """Create a filtering iterator over a list of messages.
 
     The function accepts a list of filters to be filtered
@@ -73,25 +75,26 @@ def _filter_messages(messages, filters, marker, get_object, limit=10000):
         if msg is None:
             continue
 
+        marker['next'] = msg['name']
+        try:
+            headers, obj = get_object(msg['name'])
+        except swiftclient.ClientException as exc:
+            if exc.http_status == 404:
+                continue
+            raise
+        obj = jsonutils.loads(obj)
         for should_skip in filters:
-            if should_skip(msg):
+            if should_skip(obj, headers):
                 break
         else:
-            marker['next'] = msg['name']
-            try:
-                headers, obj = get_object(msg['name'])
-            except swiftclient.ClientException as exc:
-                if exc.http_status == 404:
-                    continue
-                raise
             limit -= 1
             yield {
                 'id': marker['next'],
                 'ttl': int(headers['x-delete-at']) - now,
-                'client_uuid': headers['content-type'],
-                'body': obj,
+                'client_uuid': headers['x-object-meta-clientid'],
+                'body': obj['body'],
                 'age': now - float(headers['x-timestamp']),
-                'claim_id': None,
+                'claim_id': obj['claim_id'],
             }
             if limit <= 0:
                 break

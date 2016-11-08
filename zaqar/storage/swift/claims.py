@@ -11,6 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
+
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 import swiftclient
@@ -93,39 +96,43 @@ class ClaimController(storage.Claim):
         msg_ts = now + ttl + grace
         claim_id = uuidutils.generate_uuid()
 
-        utils._put_or_create_container(
-            self._client,
-            utils._claim_container(queue, project),
-            claim_id,
-            '',
-            headers={'if-none-match': '*',
-                     'content-type': '',
-                     'x-delete-after': now + ttl,
-                     }
-        )
-
         messages, marker = self._message_ctrl._list(
-            # list twice as many unclaimed as we need, since many of them may
-            # get claimed between listing & claiming
             queue, project, limit=limit, include_claimed=False)
 
         claimed = []
-        for m in messages:
+        for msg in messages:
+            md5 = hashlib.md5()
+            md5.update(
+                jsonutils.dumps(
+                    {'body': msg['body'], 'claim_id': None}))
+            md5 = md5.hexdigest()
+            content = jsonutils.dumps(
+                {'body': msg['body'], 'claim_id': claim_id})
             try:
-                self._claim_message(queue, project, now + ttl, m['id'],
-                                    claim_id)
+                self._client.put_object(
+                    utils._message_container(queue, project),
+                    msg['id'],
+                    content,
+                    headers={'x-object-meta-clientid': msg['client_uuid'],
+                             'if-match': md5,
+                             'x-delete-after': msg['ttl']})
             except swiftclient.ClientException as exc:
                 # if the claim exists
                 if exc.http_status == 412:
                     continue
                 raise
             else:
-                claimed.append(m)
+                claimed.append(msg)
 
-            # TODO(ryansb): background this, it doesn't have to happen right
-            # this second.
-            self._bump_message_ttls_to(queue, project, msg_ts, [m['id'] for m
-                                                                in claimed])
+        utils._put_or_create_container(
+            self._client,
+            utils._claim_container(queue, project),
+            claim_id,
+            jsonutils.dumps([msg['id'] for msg in claimed]),
+            headers={
+                'x-object-meta-claimcount': len(claimed),
+                'x-delete-after': now + ttl}
+        )
 
         return claim_id, claimed
 
@@ -133,39 +140,33 @@ class ClaimController(storage.Claim):
         raise NotImplementedError
 
     def delete(self, queue, claim_id, project=None):
-        raise NotImplementedError
+        try:
+            header, obj = self._client.get_object(
+                utils._claim_container(queue, project),
+                claim_id)
+            for msg_id in jsonutils.loads(obj):
+                try:
+                    headers, msg = self._message_ctrl._find_message(queue, msg_id,
+                                                                    project)
+                except errors.MessageDoesNotExist:
+                    continue
+                md5 = hashlib.md5()
+                md5.update(msg)
+                md5 = md5.hexdigest()
+                body = jsonutils.loads(msg)['body']
+                content = jsonutils.dumps(
+                    {'body': body, 'claim_id': None})
+                self._client.put_object(
+                    utils._message_container(queue, project),
+                    msg_id,
+                    content,
+                    headers={'x-object-meta-clientid': headers['x-object-meta-clientid'],
+                            'if-match': md5,
+                            'x-delete-after': headers['x-delete-at']})
 
-    def _claim_message(self, queue, project, ts, msg_id, claim_id):
-        # put a claim-by-message-id
-        self._client.put_object(
-            utils._claim_container(queue, project),
-            msg_id,
-            '',
-            headers={'if-none-match': '*',
-                     'content-type': claim_id,
-                     'x-delete-after': ts}
-        )
-        self._client.put_object(
-            utils._claim_container(queue, project),
-            "%s/%s" % (claim_id, msg_id),
-            '',
-            headers={'if-none-match': '*',
-                     'content-type': 'zaqar-msg-claim',
-                     'x-delete-after': ts}
-        )
-
-    def _bump_message_ttls_to(self, queue, project, ts, msg_ids):
-        """Given a list of message IDs, bump them to expire later.
-
-        This finds and bumps their index keys as well
-        """
-        client = self._client
-
-        for msg in msg_ids:
-            container = utils._message_container(queue, project)
-            msg_meta = client.head_object(container, msg)
-
-            if ts - int(msg_meta['x-delete-at']):
-                # message would expire before the claim
-                # boost the message ttl
-                client.post_object(container, msg, {'x-delete-at': ts})
+            self._client.delete_object(
+                utils._claim_container(queue, project),
+                claim_id)
+        except swiftclient.ClientException as exc:
+            if exc.http_status != 404:
+                raise
