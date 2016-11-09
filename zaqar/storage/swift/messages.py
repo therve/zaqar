@@ -170,8 +170,8 @@ class MessageController(storage.Message):
     def get(self, queue, message_id, project=None):
         return self._get(queue, message_id, project)
 
-    def _get(self, queue, message_id, project=None):
-        if not self._queue_ctrl.exists(queue, project):
+    def _get(self, queue, message_id, project=None, check_queue=True):
+        if check_queue and not self._queue_ctrl.exists(queue, project):
             raise errors.QueueDoesNotExist(queue, project)
 
         now = timeutils.utcnow_ts(True)
@@ -198,9 +198,12 @@ class MessageController(storage.Message):
                 pass
 
     def bulk_get(self, queue, message_ids, project=None):
+        if not self._queue_ctrl.exists(queue, project):
+            raise StopIteration()
+
         for id in message_ids:
             try:
-                yield self._get(queue, id, project)
+                yield self._get(queue, id, project, check_queue=False)
             except errors.MessageDoesNotExist:
                 pass
 
@@ -232,7 +235,7 @@ class MessageController(storage.Message):
     def delete(self, queue, message_id, project=None, claim=None):
         try:
             msg = self._get(queue, message_id, project)
-        except errors.MessageDoesNotExist:
+        except (errors.QueueDoesNotExist, errors.MessageDoesNotExist):
             return
         if claim is None:
             if msg['claim_id']:
