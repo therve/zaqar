@@ -298,22 +298,20 @@ class MessageQueueHandler(object):
         if not self._queue_ctrl.exists(name, project=project):
             raise errors.QueueDoesNotExist(name, project)
 
-        container_stats = self._client.head_container(
-            utils._message_container(name, project))
-
-        total = int(container_stats['x-container-object-count'])
-
+        total = 0
         claimed = 0
-        try:
-            container = utils._claim_container(name, project)
-            headers, objects = self._client.get_container(container)
-            for obj in objects:
-                headers = self._client.head_object(
-                    container, obj['name'])
-                claimed += int(headers['x-object-meta-claimcount'])
-        except swiftclient.ClientException as exc:
-            if exc.http_status != 404:
-                raise
+        container = utils._message_container(name, project)
+        _, objects = self._client.get_container(container)
+        for obj in objects:
+            try:
+                headers = self._client.head_object(container, obj['name'])
+            except swiftclient.ClientException as exc:
+                if exc.http_status != 404:
+                    raise
+            else:
+                total += 1
+                if headers.get('x-object-meta-claimid'):
+                    claimed += 1
 
         msg_stats = {
             'claimed': claimed,

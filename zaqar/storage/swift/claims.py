@@ -115,7 +115,8 @@ class ClaimController(storage.Claim):
                     content,
                     headers={'x-object-meta-clientid': msg['client_uuid'],
                              'if-match': md5,
-                             'x-delete-after': msg['ttl']})
+                             'x-object-meta-claimid': claim_id,
+                             'x-delete-after': msg_ts})
             except swiftclient.ClientException as exc:
                 # if the claim exists
                 if exc.http_status == 412:
@@ -156,7 +157,7 @@ class ClaimController(storage.Claim):
                 body = jsonutils.loads(msg)['body']
                 content = jsonutils.dumps(
                     {'body': body, 'claim_id': None})
-                client_id = headers['x-object-meta-clientid'],
+                client_id = headers['x-object-meta-clientid']
                 self._client.put_object(
                     utils._message_container(queue, project),
                     msg_id,
