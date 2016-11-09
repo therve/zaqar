@@ -32,6 +32,10 @@ def _subscription_container(queue, project=None):
     return "zaqar_subscription:%s:%s" % (queue, project)
 
 
+def _subscriber_container(queue, project=None):
+    return "zaqar_subscriber:%s:%s" % (queue, project)
+
+
 def _put_or_create_container(client, *args, **kwargs):
     """PUT a swift object to a container that may not exist
 

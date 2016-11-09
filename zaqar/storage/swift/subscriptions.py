@@ -15,6 +15,7 @@ import functools
 from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
 import swiftclient
+import urllib
 
 from zaqar import storage
 from zaqar.storage import errors
@@ -75,8 +76,20 @@ class SubscriptionController(storage.Subscription):
         return utils._subscription_to_json(data, headers)
 
     def create(self, queue, subscriber, ttl, options, project=None):
-        container = utils._subscription_container(queue, project)
+        sub_container = utils._subscriber_container(queue, project)
         slug = uuidutils.generate_uuid()
+        try:
+            utils._put_or_create_container(
+                self._client,
+                sub_container,
+                urllib.quote_plus(subscriber),
+                contents=slug,
+                headers={'x-delete-after': ttl, 'if-none-match': '*'})
+        except swiftclient.ClientException as exc:
+            if exc.http_status == 412:
+                return
+            raise
+        container = utils._subscription_container(queue, project)
         data = {'id': slug,
                 'source': queue,
                 'subscriber': subscriber,
@@ -93,6 +106,20 @@ class SubscriptionController(storage.Subscription):
         data = self.get(queue, subscription_id, project)
         data.pop('age')
         ttl = data['ttl']
+        if 'subscriber' in kwargs:
+            sub_container = utils._subscriber_container(queue, project)
+            try:
+                self._client.put_object(
+                    sub_container,
+                    urllib.quote_plus(kwargs['subscriber']),
+                    contents=subscription_id,
+                    headers={'x-delete-after': ttl, 'if-none-match': '*'})
+            except swiftclient.ClientException as exc:
+                if exc.http_status == 412:
+                    raise errors.SubscriptionAlreadyExists()
+                raise
+            self._client.delete_object(sub_container,
+                                       urllib.quote_plus(data['subscriber']))
         data.update(kwargs)
         self._client.put_object(container,
                                 subscription_id,
@@ -104,12 +131,29 @@ class SubscriptionController(storage.Subscription):
         return self._client.head_object(container, subscription_id)
 
     def delete(self, queue, subscription_id, project=None):
+        try:
+            data = self.get(queue, subscription_id, project)
+        except errors.SubscriptionDoesNotExist:
+            return
+        sub_container = utils._subscriber_container(queue, project)
+        try:
+            self._client.delete_object(sub_container,
+                                    urllib.quote_plus(data['subscriber']))
+        except swiftclient.ClientException as exc:
+            if exc.http_status != 404:
+                raise
         container = utils._subscription_container(queue, project)
-        return self._client.delete_object(container, subscription_id)
+        try:
+            self._client.delete_object(container, subscription_id)
+        except swiftclient.ClientException as exc:
+            if exc.http_status != 404:
+                raise
 
     def get_with_subscriber(self, queue, subscriber, project=None):
-        # XXX need an additional container
-        pass
+        sub_container = utils._subscriber_container(queue, project)
+        headers, obj = self._client.get_object(sub_container,
+                                               urllib.quote_plus(subscriber))
+        return self.get(queue, obj['name'], project)
 
     def confirm(self, queue, subscription_id, project=None, confirmed=True):
         self.update(queue, subscription_id, project, confirmed=True)

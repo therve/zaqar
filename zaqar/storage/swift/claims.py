@@ -146,8 +146,8 @@ class ClaimController(storage.Claim):
                 claim_id)
             for msg_id in jsonutils.loads(obj):
                 try:
-                    headers, msg = self._message_ctrl._find_message(queue, msg_id,
-                                                                    project)
+                    headers, msg = self._message_ctrl._find_message(
+                        queue, msg_id, project)
                 except errors.MessageDoesNotExist:
                     continue
                 md5 = hashlib.md5()
@@ -156,13 +156,14 @@ class ClaimController(storage.Claim):
                 body = jsonutils.loads(msg)['body']
                 content = jsonutils.dumps(
                     {'body': body, 'claim_id': None})
+                client_id = headers['x-object-meta-clientid'],
                 self._client.put_object(
                     utils._message_container(queue, project),
                     msg_id,
                     content,
-                    headers={'x-object-meta-clientid': headers['x-object-meta-clientid'],
-                            'if-match': md5,
-                            'x-delete-after': headers['x-delete-at']})
+                    headers={'x-object-meta-clientid': client_id,
+                             'if-match': md5,
+                             'x-delete-after': headers['x-delete-at']})
 
             self._client.delete_object(
                 utils._claim_container(queue, project),

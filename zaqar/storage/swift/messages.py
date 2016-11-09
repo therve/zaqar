@@ -305,12 +305,12 @@ class MessageQueueHandler(object):
 
         claimed = 0
         try:
-           container = utils._claim_container(name, project)
-           headers, objects = self._client.get_container(container)
-           for obj in objects:
-               headers = self._client.head_object(
-                   container, obj['name'])
-               claimed += int(headers['x-object-meta-claimcount'])
+            container = utils._claim_container(name, project)
+            headers, objects = self._client.get_container(container)
+            for obj in objects:
+                headers = self._client.head_object(
+                    container, obj['name'])
+                claimed += int(headers['x-object-meta-claimcount'])
         except swiftclient.ClientException as exc:
             if exc.http_status != 404:
                 raise

@@ -103,7 +103,8 @@ class QueueController(storage.Queue):
 
     def _exists(self, name, project=None):
         try:
-            return self._client.head_object(utils._queue_container(project), name)
+            return self._client.head_object(utils._queue_container(project),
+                                            name)
         except swiftclient.ClientException as exc:
             if exc.http_status != 404:
                 raise
