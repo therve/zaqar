@@ -10,6 +10,8 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+import functools
+
 from oslo_serialization import jsonutils
 import swiftclient
 
@@ -55,7 +57,9 @@ class QueueController(storage.Queue):
             else:
                 raise
         marker_next = {}
-        yield utils.QueueListCursor(objects, detailed, marker_next, container)
+        yield utils.QueueListCursor(
+            objects, detailed, marker_next,
+            functools.partial(self._client.get_object, container))
         yield marker_next and marker_next['next']
 
     def _get(self, name, project=None):
@@ -83,9 +87,10 @@ class QueueController(storage.Queue):
             utils._put_or_create_container(
                 self._client, utils._queue_container(project), name,
                 content_type='application/json',
-                contents=jsonutils.dumps(metadata))
+                contents=jsonutils.dumps(metadata),
+                headers={'if-none-match': '*'})
         except swiftclient.ClientException as exc:
-            if exc.http_status == 304:
+            if exc.http_status == 412:
                 return False
             raise
         else:
