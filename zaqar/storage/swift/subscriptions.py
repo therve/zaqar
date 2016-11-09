@@ -10,6 +10,9 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+import functools
+
+from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
 import swiftclient
 
@@ -56,18 +59,20 @@ class SubscriptionController(storage.Subscription):
             else:
                 raise
         marker_next = {}
-        yield utils.SubscriptionListCursor(objects, marker_next)
+        yield utils.SubscriptionListCursor(
+            objects, marker_next,
+            functools.partial(self._client.get_object, container))
         yield marker_next and marker_next['next']
 
     def get(self, queue, subscription_id, project=None):
         container = utils._subscription_container(queue, project)
         try:
-            _, data = self._client.get_object(container, subscription_id)
+            headers, data = self._client.get_object(container, subscription_id)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 raise errors.SubscriptionDoesNotExist(subscription_id)
             raise
-        return data
+        return utils._subscription_to_json(data, headers)
 
     def create(self, queue, subscriber, ttl, options, project=None):
         container = utils._subscription_container(queue, project)
@@ -75,21 +80,24 @@ class SubscriptionController(storage.Subscription):
         data = {'id': slug,
                 'source': queue,
                 'subscriber': subscriber,
-                'ttl': ttl,
-                'age': None,
                 'options': options,
+                'ttl': ttl,
                 'confirmed': False}
         utils._put_or_create_container(
-            self._client, container, slug, contents=data)
+            self._client, container, slug, contents=jsonutils.dumps(data),
+            headers={'x-delete-after': ttl})
         return slug
 
     def update(self, queue, subscription_id, project=None, **kwargs):
         container = utils._subscription_container(queue, project)
-        data = {'id': subscription_id}
+        data = self.get(queue, subscription_id, project)
+        data.pop('age')
+        ttl = data['ttl']
         data.update(kwargs)
         self._client.put_object(container,
                                 subscription_id,
-                                contents=data)
+                                contents=jsonutils.dumps(data),
+                                headers={'x-delete-after': ttl})
 
     def exists(self, queue, subscription_id, project=None):
         container = utils._subscription_container(queue, project)
@@ -104,4 +112,4 @@ class SubscriptionController(storage.Subscription):
         pass
 
     def confirm(self, queue, subscription_id, project=None, confirmed=True):
-        pass
+        self.update(queue, subscription_id, project, confirmed=True)

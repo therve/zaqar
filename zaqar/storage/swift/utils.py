@@ -63,6 +63,18 @@ def _message_to_json(message_id, msg, headers, now=None):
     }
 
 
+def _subscription_to_json(sub, headers):
+    sub = jsonutils.loads(sub)
+    now = timeutils.utcnow_ts()
+    return {'id': sub['id'],
+            'age': now - float(headers['x-timestamp']),
+            'source': sub['source'],
+            'subscriber': sub['subscriber'],
+            'ttl': sub['ttl'],
+            'options': sub['options'],
+            'confirmed': sub['confirmed']}
+
+
 def _filter_messages(messages, filters, marker, get_object, limit):
     """Create a filtering iterator over a list of messages.
 
@@ -102,11 +114,11 @@ def _filter_messages(messages, filters, marker, get_object, limit):
 
 class QueueListCursor(object):
 
-    def __init__(self, objects, detailed, marker_next, container):
+    def __init__(self, objects, detailed, marker_next, get_object):
         self.objects = iter(objects)
         self.detailed = detailed
         self.marker_next = marker_next
-        self.container = container
+        self.get_object = get_object
 
     def __iter__(self):
         return self
@@ -116,7 +128,7 @@ class QueueListCursor(object):
         self.marker_next['next'] = curr['name']
         queue = {'name': curr['name']}
         if self.detailed:
-            _, metadata = self._client.get_object(self.container, curr['name'])
+            _, metadata = self.get_object(curr['name'])
             queue['metadata'] = metadata
         return queue
 
@@ -126,9 +138,10 @@ class QueueListCursor(object):
 
 class SubscriptionListCursor(object):
 
-    def __init__(self, objects, marker_next):
+    def __init__(self, objects, marker_next, get_object):
         self.objects = iter(objects)
         self.marker_next = marker_next
+        self.get_object = get_object
 
     def __iter__(self):
         return self
@@ -136,7 +149,8 @@ class SubscriptionListCursor(object):
     def next(self):
         curr = next(self.objects)
         self.marker_next['next'] = curr['name']
-        return curr['name']
+        headers, sub = self.get_object(curr['name'])
+        return _subscription_to_json(sub, headers)
 
     def __next__(self):
         return self.next()
