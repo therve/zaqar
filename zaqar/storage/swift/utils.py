@@ -52,10 +52,7 @@ def _put_or_create_container(client, *args, **kwargs):
             raise
 
 
-def _message_to_json(message_id, msg, headers, now=None):
-    if now is None:
-        now = timeutils.utcnow_ts()
-
+def _message_to_json(message_id, msg, headers, now):
     msg = jsonutils.loads(msg)
 
     return {
@@ -69,7 +66,7 @@ def _message_to_json(message_id, msg, headers, now=None):
 
 def _subscription_to_json(sub, headers):
     sub = jsonutils.loads(sub)
-    now = timeutils.utcnow_ts()
+    now = timeutils.utcnow_ts(True)
     return {'id': sub['id'],
             'age': now - float(headers['x-timestamp']),
             'source': sub['source'],
@@ -85,7 +82,7 @@ def _filter_messages(messages, filters, marker, get_object, limit):
     The function accepts a list of filters to be filtered
     before the the message can be included as a part of the reply.
     """
-    now = timeutils.utcnow_ts()
+    now = timeutils.utcnow_ts(True)
 
     for msg in messages:
         if msg is None:

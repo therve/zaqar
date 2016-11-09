@@ -53,7 +53,7 @@ class ClaimController(storage.Claim):
         return True
 
     def get(self, queue, claim_id, project=None):
-        now = timeutils.utcnow_ts()
+        now = timeutils.utcnow_ts(True)
         self._exists(queue, claim_id, project)
 
         container = utils._claim_container(queue, project)
@@ -92,7 +92,7 @@ class ClaimController(storage.Claim):
                limit=storage.DEFAULT_MESSAGES_PER_CLAIM):
         ttl = metadata['ttl']
         grace = metadata['grace']
-        now = timeutils.utcnow_ts()
+        now = timeutils.utcnow_ts(True)
         msg_ts = now + ttl + grace
         claim_id = uuidutils.generate_uuid()
 
@@ -116,7 +116,7 @@ class ClaimController(storage.Claim):
                     headers={'x-object-meta-clientid': msg['client_uuid'],
                              'if-match': md5,
                              'x-object-meta-claimid': claim_id,
-                             'x-delete-after': msg_ts})
+                             'x-delete-after': int(msg_ts)})
             except swiftclient.ClientException as exc:
                 # if the claim exists
                 if exc.http_status == 412:
@@ -132,7 +132,7 @@ class ClaimController(storage.Claim):
             jsonutils.dumps([msg['id'] for msg in claimed]),
             headers={
                 'x-object-meta-claimcount': len(claimed),
-                'x-delete-after': now + ttl}
+                'x-delete-after': int(now + ttl)}
         )
 
         return claim_id, claimed

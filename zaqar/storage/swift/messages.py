@@ -174,7 +174,7 @@ class MessageController(storage.Message):
         if not self._queue_ctrl.exists(queue, project):
             raise errors.QueueDoesNotExist(queue, project)
 
-        now = timeutils.utcnow_ts()
+        now = timeutils.utcnow_ts(True)
 
         headers, msg = self._find_message(queue, message_id, project)
         return utils._message_to_json(message_id, msg, headers, now)
@@ -302,6 +302,9 @@ class MessageQueueHandler(object):
         claimed = 0
         container = utils._message_container(name, project)
         _, objects = self._client.get_container(container)
+        newest = None
+        oldest = None
+        now = timeutils.utcnow_ts(True)
         for obj in objects:
             try:
                 headers = self._client.head_object(container, obj['name'])
@@ -309,6 +312,13 @@ class MessageQueueHandler(object):
                 if exc.http_status != 404:
                     raise
             else:
+                created = float(headers['x-timestamp'])
+                newest = {
+                    'id': obj['name'],
+                    'age': now - created,
+                    'created': timeutils.iso8601_from_timestamp(created)}
+                if oldest is None:
+                    oldest = newest
                 total += 1
                 if headers.get('x-object-meta-claimid'):
                     claimed += 1
@@ -318,6 +328,9 @@ class MessageQueueHandler(object):
             'free': total - claimed,
             'total': total,
         }
+        if newest is not None:
+            msg_stats['newest'] = newest
+            msg_stats['oldest'] = oldest
 
         return {'messages': msg_stats}
 
