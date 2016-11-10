@@ -73,27 +73,17 @@ class ClaimController(storage.Claim):
 
         container = utils._claim_container(queue, project)
 
-        headers, claim_owns = self._client.get_container(
-            container,
-            path=claim_id,
-            full_listing=True,
-        )  # full message locations are in content-type
+        headers, claim_obj = self._client.get_object(container, claim_id)
 
         def g():
-            for m in claim_owns:
+            for msg_id in jsonutils.loads(claim_obj):
                 try:
-                    h, msg = self._client.get_object(
-                        *m['content_type'].split(":::")
-                    )
-                except swiftclient.ClientException as exc:
-                    if exc.http_status == 404:
-                        continue
-                    raise
+                    headers, msg = self._message_ctrl._find_message(
+                        queue, msg_id, project)
+                except errors.MessageDoesNotExist:
+                    continue
                 else:
-                    yield utils._message_to_json(m.split('/')[-1], msg, h, now)
-
-        # content-type here contains the client UUID of claimant
-        headers, claim = self._client.get_object(container, claim_id)
+                    yield utils._message_to_json(msg_id, msg, headers, now)
 
         claim_meta = {
             'id': claim_id,
@@ -101,7 +91,7 @@ class ClaimController(storage.Claim):
             'ttl': int(headers['x-delete-at']) - now,
         }
 
-        return claim_meta, list(g())
+        return claim_meta, g()
 
     def create(self, queue, metadata, project=None,
                limit=storage.DEFAULT_MESSAGES_PER_CLAIM):
@@ -138,6 +128,7 @@ class ClaimController(storage.Claim):
                     continue
                 raise
             else:
+                msg['claim_id'] = claim_id
                 claimed.append(msg)
 
         utils._put_or_create_container(
