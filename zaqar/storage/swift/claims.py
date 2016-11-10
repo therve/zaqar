@@ -43,14 +43,29 @@ class ClaimController(storage.Claim):
 
     def _exists(self, queue, claim_id, project=None):
         try:
-            self._client.head_object(
+            return self._client.head_object(
                 utils._claim_container(queue, project),
                 claim_id)
         except swiftclient.ClientException as exc:
             if exc.http_status == 404:
                 raise errors.ClaimDoesNotExist(claim_id, queue, project)
             raise
-        return True
+
+    def _get(self, queue, claim_id, project=None):
+        try:
+            container = utils._claim_container(queue, project)
+            headers, claim = self._client.get_object(container, claim_id)
+        except swiftclient.ClientException as exc:
+            if exc.http_status != 404:
+                raise
+            return
+        now = timeutils.utcnow_ts(True)
+        return {
+            'id': claim_id,
+            'age': now - float(headers['x-timestamp']),
+            'ttl': int(headers['x-delete-at']) - now,
+        }
+
 
     def get(self, queue, claim_id, project=None):
         now = timeutils.utcnow_ts(True)
@@ -93,7 +108,7 @@ class ClaimController(storage.Claim):
         ttl = metadata['ttl']
         grace = metadata['grace']
         now = timeutils.utcnow_ts(True)
-        msg_ts = now + ttl + grace
+        msg_ts = ttl + grace
         claim_id = uuidutils.generate_uuid()
 
         messages, marker = self._message_ctrl._list(
@@ -131,14 +146,22 @@ class ClaimController(storage.Claim):
             claim_id,
             jsonutils.dumps([msg['id'] for msg in claimed]),
             headers={
-                'x-object-meta-claimcount': len(claimed),
-                'x-delete-after': int(now + ttl)}
+                'x-delete-after': int(ttl)}
         )
 
         return claim_id, claimed
 
     def update(self, queue, claim_id, metadata, project=None):
-        raise NotImplementedError
+        container = utils._claim_container(queue, project)
+        try:
+            headers, obj = self._client.get_object(container, claim_id)
+        except swiftclient.ClientException as exc:
+            if exc.http_status == 404:
+                raise errors.ClaimDoesNotExist(claim_id, queue, project)
+            raise
+
+        self._client.put_object(container, claim_id, obj,
+                                headers={'x-delete-after': metadata['ttl']})
 
     def delete(self, queue, claim_id, project=None):
         try:
@@ -164,7 +187,7 @@ class ClaimController(storage.Claim):
                     content,
                     headers={'x-object-meta-clientid': client_id,
                              'if-match': md5,
-                             'x-delete-after': headers['x-delete-at']})
+                             'x-delete-at': headers['x-delete-at']})
 
             self._client.delete_object(
                 utils._claim_container(queue, project),

@@ -76,7 +76,7 @@ def _subscription_to_json(sub, headers):
             'confirmed': sub['confirmed']}
 
 
-def _filter_messages(messages, filters, marker, get_object, limit):
+def _filter_messages(messages, filters, marker, get_object, list_objects, limit):
     """Create a filtering iterator over a list of messages.
 
     The function accepts a list of filters to be filtered
@@ -111,6 +111,12 @@ def _filter_messages(messages, filters, marker, get_object, limit):
             }
             if limit <= 0:
                 break
+    if limit > 0 and marker:
+        # We haven't reached the limit, let's try to get some more messages
+        _, objects = list_objects(marker=marker['next'])
+        for msg in _filter_messages(objects, filters, marker, get_object,
+                                    list_objects, limit):
+            yield msg
 
 
 class QueueListCursor(object):

@@ -120,7 +120,7 @@ class MessageController(storage.Message):
             query_string = 'reverse=on'
 
         try:
-            headers, objects = client.get_container(
+            _, objects = client.get_container(
                 container,
                 marker=marker,
                 # list 2x the objects because some listing items may have
@@ -147,9 +147,12 @@ class MessageController(storage.Message):
             is_claimed,
         ]
         marker = {}
-        obj_getter = functools.partial(self._client.get_object, container)
-        yield utils._filter_messages(objects, filters, marker, obj_getter,
-                                     limit=limit)
+        get_object = functools.partial(client.get_object, container)
+        list_objects = functools.partial(client.get_container, container,
+                                         limit=limit * 2,
+                                         query_string=query_string)
+        yield utils._filter_messages(objects, filters, marker, get_object,
+                                     list_objects, limit=limit)
         yield marker and marker['next']
 
     def list(self, queue, project=None, marker=None,
@@ -242,7 +245,9 @@ class MessageController(storage.Message):
             return
         if claim is None:
             if msg['claim_id']:
-                raise errors.MessageIsClaimed(message_id)
+                claim_obj = self._claim_ctrl._get(queue, msg['claim_id'], project)
+                if claim_obj is not None and claim_obj['ttl'] > 0:
+                    raise errors.MessageIsClaimed(message_id)
         else:
             # Check if the claim does exist
             self._claim_ctrl._exists(queue, claim, project)
