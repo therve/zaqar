@@ -138,7 +138,7 @@ class SubscriptionController(storage.Subscription):
         sub_container = utils._subscriber_container(queue, project)
         try:
             self._client.delete_object(sub_container,
-                                    urllib.quote_plus(data['subscriber']))
+                                       urllib.quote_plus(data['subscriber']))
         except swiftclient.ClientException as exc:
             if exc.http_status != 404:
                 raise

@@ -600,7 +600,6 @@ class MessageControllerTest(ControllerBaseTest):
         else:
             self.fail("Didn't remove the queue")
 
-
         # Make sure expired messages not return when listing
         interaction = self.controller.list(self.queue_name,
                                            project=self.project)
@@ -1187,7 +1186,8 @@ class SubscriptionControllerTest(ControllerBaseTest):
         except Exception:
             self.fail("Subscription controller should not raise an exception "
                       "in case of non-existing queue.")
-        self.addCleanup(self.subscription_controller.delete, 'fake_queue_name', s_id, self.project)
+        self.addCleanup(self.subscription_controller.delete, 'fake_queue_name',
+                        s_id, self.project)
 
     @ddt.data(True, False)
     def test_update_raises_if_try_to_update_to_existing_subscription(

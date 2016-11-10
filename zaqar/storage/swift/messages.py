@@ -245,7 +245,8 @@ class MessageController(storage.Message):
             return
         if claim is None:
             if msg['claim_id']:
-                claim_obj = self._claim_ctrl._get(queue, msg['claim_id'], project)
+                claim_obj = self._claim_ctrl._get(queue, msg['claim_id'],
+                                                  project)
                 if claim_obj is not None and claim_obj['ttl'] > 0:
                     raise errors.MessageIsClaimed(message_id)
         else:

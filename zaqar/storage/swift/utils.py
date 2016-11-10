@@ -76,7 +76,8 @@ def _subscription_to_json(sub, headers):
             'confirmed': sub['confirmed']}
 
 
-def _filter_messages(messages, filters, marker, get_object, list_objects, limit):
+def _filter_messages(messages, filters, marker, get_object, list_objects,
+                     limit):
     """Create a filtering iterator over a list of messages.
 
     The function accepts a list of filters to be filtered

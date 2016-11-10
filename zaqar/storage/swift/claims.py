@@ -67,7 +67,6 @@ class ClaimController(storage.Claim):
             'ttl': int(headers['x-delete-at']) - math.floor(now),
         }
 
-
     def get(self, queue, claim_id, project=None):
         now = timeutils.utcnow_ts(True)
         self._exists(queue, claim_id, project)
@@ -109,7 +108,8 @@ class ClaimController(storage.Claim):
             md5 = hashlib.md5()
             md5.update(
                 jsonutils.dumps(
-                    {'body': msg['body'], 'claim_id': None, 'ttl': msg['ttl']}))
+                    {'body': msg['body'], 'claim_id': None,
+                     'ttl': msg['ttl']}))
             md5 = md5.hexdigest()
             msg_ttl = max(msg['ttl'], msg_ts)
             content = jsonutils.dumps(
