@@ -114,6 +114,8 @@ def _filter_messages(messages, filters, marker, get_object, list_objects, limit)
     if limit > 0 and marker:
         # We haven't reached the limit, let's try to get some more messages
         _, objects = list_objects(marker=marker['next'])
+        if not objects:
+            return
         for msg in _filter_messages(objects, filters, marker, get_object,
                                     list_objects, limit):
             yield msg
