@@ -160,6 +160,9 @@ class MessageController(storage.Message):
                           client_uuid, include_claimed)
 
     def first(self, queue, project=None, sort=1):
+        if sort not in (1, -1):
+            raise ValueError(u'sort must be either 1 (ascending) '
+                             u'or -1 (descending)')
         cursor = self._list(queue, project, limit=1, sort=sort)
         try:
             message = next(next(cursor))
@@ -217,7 +220,7 @@ class MessageController(storage.Message):
     def _create_msg(self, queue, msg, client_uuid, project):
         slug = str(uuid.uuid1())
         contents = jsonutils.dumps(
-            {'body': msg.get('body', {}), 'claim_id': None})
+            {'body': msg.get('body', {}), 'claim_id': None, 'ttl': msg['ttl']})
         try:
             self._client.put_object(
                 utils._message_container(queue, project),
@@ -241,6 +244,8 @@ class MessageController(storage.Message):
             if msg['claim_id']:
                 raise errors.MessageIsClaimed(message_id)
         else:
+            # Check if the claim does exist
+            self._claim_ctrl._exists(queue, claim, project)
             if not msg['claim_id']:
                 raise errors.MessageNotClaimed(message_id)
             elif msg['claim_id'] != claim:

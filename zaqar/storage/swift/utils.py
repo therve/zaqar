@@ -58,7 +58,7 @@ def _message_to_json(message_id, msg, headers, now):
     return {
         'id': message_id,
         'age': now - float(headers['x-timestamp']),
-        'ttl': int(headers['x-delete-at']) - now,
+        'ttl': msg['ttl'],
         'body': msg['body'],
         'claim_id': msg['claim_id']
     }
@@ -106,7 +106,7 @@ def _filter_messages(messages, filters, marker, get_object, limit):
                 'ttl': int(headers['x-delete-at']) - now,
                 'client_uuid': headers['x-object-meta-clientid'],
                 'body': obj['body'],
-                'age': now - float(headers['x-timestamp']),
+                'age': obj['ttl'],
                 'claim_id': obj['claim_id'],
             }
             if limit <= 0:

@@ -104,10 +104,10 @@ class ClaimController(storage.Claim):
             md5 = hashlib.md5()
             md5.update(
                 jsonutils.dumps(
-                    {'body': msg['body'], 'claim_id': None}))
+                    {'body': msg['body'], 'claim_id': None, 'ttl': msg['ttl']}))
             md5 = md5.hexdigest()
             content = jsonutils.dumps(
-                {'body': msg['body'], 'claim_id': claim_id})
+                {'body': msg['body'], 'claim_id': claim_id, 'ttl': msg['ttl']})
             try:
                 self._client.put_object(
                     utils._message_container(queue, project),
@@ -154,9 +154,9 @@ class ClaimController(storage.Claim):
                 md5 = hashlib.md5()
                 md5.update(msg)
                 md5 = md5.hexdigest()
-                body = jsonutils.loads(msg)['body']
+                msg = jsonutils.loads(msg)
                 content = jsonutils.dumps(
-                    {'body': body, 'claim_id': None})
+                    {'body': msg['body'], 'claim_id': None, 'ttl': msg['ttl']})
                 client_id = headers['x-object-meta-clientid']
                 self._client.put_object(
                     utils._message_container(queue, project),
