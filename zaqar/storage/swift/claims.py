@@ -12,6 +12,7 @@
 # limitations under the License.
 
 import hashlib
+import math
 
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
@@ -63,7 +64,7 @@ class ClaimController(storage.Claim):
         return {
             'id': claim_id,
             'age': now - float(headers['x-timestamp']),
-            'ttl': int(headers['x-delete-at']) - now,
+            'ttl': int(headers['x-delete-at']) - math.floor(now),
         }
 
 
@@ -88,7 +89,7 @@ class ClaimController(storage.Claim):
         claim_meta = {
             'id': claim_id,
             'age': now - float(headers['x-timestamp']),
-            'ttl': int(headers['x-delete-at']) - now,
+            'ttl': int(headers['x-delete-at']) - math.floor(now),
         }
 
         return claim_meta, g()
@@ -97,7 +98,6 @@ class ClaimController(storage.Claim):
                limit=storage.DEFAULT_MESSAGES_PER_CLAIM):
         ttl = metadata['ttl']
         grace = metadata['grace']
-        now = timeutils.utcnow_ts(True)
         msg_ts = ttl + grace
         claim_id = uuidutils.generate_uuid()
 
@@ -111,8 +111,9 @@ class ClaimController(storage.Claim):
                 jsonutils.dumps(
                     {'body': msg['body'], 'claim_id': None, 'ttl': msg['ttl']}))
             md5 = md5.hexdigest()
+            msg_ttl = max(msg['ttl'], msg_ts)
             content = jsonutils.dumps(
-                {'body': msg['body'], 'claim_id': claim_id, 'ttl': msg['ttl']})
+                {'body': msg['body'], 'claim_id': claim_id, 'ttl': msg_ttl})
             try:
                 self._client.put_object(
                     utils._message_container(queue, project),
@@ -121,7 +122,7 @@ class ClaimController(storage.Claim):
                     headers={'x-object-meta-clientid': msg['client_uuid'],
                              'if-match': md5,
                              'x-object-meta-claimid': claim_id,
-                             'x-delete-after': int(msg_ts)})
+                             'x-delete-after': msg_ttl})
             except swiftclient.ClientException as exc:
                 # if the claim exists
                 if exc.http_status == 412:
@@ -129,6 +130,7 @@ class ClaimController(storage.Claim):
                 raise
             else:
                 msg['claim_id'] = claim_id
+                msg['ttl'] = msg_ttl
                 claimed.append(msg)
 
         utils._put_or_create_container(
@@ -136,8 +138,7 @@ class ClaimController(storage.Claim):
             utils._claim_container(queue, project),
             claim_id,
             jsonutils.dumps([msg['id'] for msg in claimed]),
-            headers={
-                'x-delete-after': int(ttl)}
+            headers={'x-delete-after': ttl}
         )
 
         return claim_id, claimed

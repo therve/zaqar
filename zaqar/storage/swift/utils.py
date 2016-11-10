@@ -103,10 +103,10 @@ def _filter_messages(messages, filters, marker, get_object, list_objects, limit)
             limit -= 1
             yield {
                 'id': marker['next'],
-                'ttl': int(headers['x-delete-at']) - now,
+                'ttl': obj['ttl'],
                 'client_uuid': headers['x-object-meta-clientid'],
                 'body': obj['body'],
-                'age': obj['ttl'],
+                'age': now - float(headers['x-timestamp']),
                 'claim_id': obj['claim_id'],
             }
             if limit <= 0:
