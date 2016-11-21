@@ -63,14 +63,6 @@ class MessageController(storage.Message):
     def _claim_ctrl(self):
         return self.driver.claim_controller
 
-    def _count(self, queue, project):
-        """Return total number of messages in a queue.
-
-        Note: Some expired messages may be included in the count if
-            they haven't been GC'd yet. This is done for performance.
-        """
-        raise NotImplementedError("Can't do global counts. Sucks to suck")
-
     def _delete_queue_messages(self, queue, project, pipe):
         """Method to remove all the messages belonging to a queue.
 
@@ -78,7 +70,6 @@ class MessageController(storage.Message):
         The pipe to execute deletion will be passed from the QueueController
         executing the operation.
         """
-        # TODO(ryansb): handle sharded queue buckets
         container = utils._message_container(queue, project)
         remaining = True
         key = ''
