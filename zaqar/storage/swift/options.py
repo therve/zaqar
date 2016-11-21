@@ -16,10 +16,11 @@
 from oslo_config import cfg
 MESSAGE_SWIFT_OPTIONS = (
     cfg.StrOpt('auth_url', default="http://127.0.0.1:5000/v2.0/",
-               help="URI of keystone endpoint to discover swift"),
+               help="URI of Keystone endpoint to discover Swift"),
     cfg.StrOpt('user', default="demo", help="Username"),
     cfg.StrOpt('tenant', default="demo", help="Tenant"),
     cfg.StrOpt('password', default="nomoresecrete", help="Password"),
+    cfg.StrOpt('insecure', default=False, help="Don't check SSL certificate"),
 )
 
 

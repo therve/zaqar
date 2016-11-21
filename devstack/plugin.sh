@@ -134,6 +134,19 @@ function configure_zaqar {
         iniset $ZAQAR_CONF 'drivers:message_store:redis' database zaqar
         configure_redis
     fi
+    elif [ "$ZAQAR_BACKEND" = 'swift' ] ; then
+        recreate_database zaqar
+        iniset $ZAQAR_CONF  drivers management_store sqlalchemy
+        iniset $ZAQAR_CONF 'drivers:management_store:sqlalchemy' uri `database_connection_url zaqar`
+        iniset $ZAQAR_CONF 'drivers:management_store:sqlalchemy' database zaqar_mgmt
+
+        get_or_add_user_project_role ResellerAdmin zaqar service
+        iniset $ZAQAR_CONF  drivers message_store swift
+        iniset $ZAQAR_CONF 'drivers:message_store:swift' username zaqar
+        iniset $ZAQAR_CONF 'drivers:message_store:swift' password $SERVICE_PASSWORD
+        iniset $ZAQAR_CONF 'drivers:message_store:swift' tenant service
+        iniset $ZAQAR_CONF 'drivers:message_store:swift' auth_uri $KEYSTONE_AUTH_URI
+    fi
 
     if is_service_enabled qpid || [ -n "$RABBIT_HOST" ] && [ -n "$RABBIT_PASSWORD" ]; then
         iniset $ZAQAR_CONF DEFAULT notification_driver messaging

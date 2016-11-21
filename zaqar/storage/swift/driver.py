@@ -72,7 +72,6 @@ class DataDriver(storage.DataDriverBase):
 
 def _get_swift_client(driver):
     conf = driver.swift_conf
-    # TODO(ryansb): use the config
     return swiftclient.Connection(conf.auth_url, conf.user, conf.password,
-                                  insecure=True, auth_version="2.0",
+                                  insecure=conf.insecure, auth_version="2.0",
                                   tenant_name=conf.tenant)
